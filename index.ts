@@ -1,6 +1,3 @@
-// index.ts (fixed)
-// Final index.ts with enhanced DeFi agent and professional user interaction
-
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -12,6 +9,7 @@ import { AgentExecutor, createToolCallingAgent } from "langchain/agents";
 import { ChatGroq } from "@langchain/groq";
 import { Client, PrivateKey } from "@hashgraph/sdk";
 import { HederaLangchainToolkit, AgentMode, coreAccountQueryPlugin, coreAccountQueryPluginToolNames } from "hedera-agent-kit";
+import {accountQueryPlugin,accountQueryPluginToolNames, bestStrategyPlugin,bestStrategyPluginToolNames} from "./my-custom-plugins/index.js";
 import { logger, logSuccess, logError, logDebug } from "./logger.js";
 import { isSmallTalk } from "./utils/isSmallTalk.js";
 
@@ -79,9 +77,21 @@ export async function buildAgentExecutor(client: Client) {
     client,
     configuration: {
       tools: [
-        coreAccountQueryPluginToolNames.GET_HBAR_BALANCE_QUERY_TOOL
+        //Core hedera tool
+        coreAccountQueryPluginToolNames.GET_HBAR_BALANCE_QUERY_TOOL,
+
+        //Custom tools
+
+        //Account query to get token balances
+        accountQueryPluginToolNames.GET_ALL_TOKEN_BALANCES,
+
+        //Best strategy tool to get best staking strategy based on APY
+        bestStrategyPluginToolNames.BEST_STRATEGY_TOOL,
+
+
+
       ],
-      plugins: [coreAccountQueryPlugin],
+      plugins: [coreAccountQueryPlugin,accountQueryPlugin, bestStrategyPlugin],
       context: {
         // Keep same as your original intent; agent autonomy is controlled by behavior rules
         mode: AgentMode.AUTONOMOUS,
@@ -108,6 +118,10 @@ Help users efficiently manage DeFi operations, with expertise in AutoSwap limit 
 
 **Account & Network Operations:**
 • GET_HBAR_BALANCE: Get HBAR balance for account (STOP after showing result)
+• GET_ALL_TOKEN_BALANCES: List all token balances for account (STOP after showing result)
+
+**DeFi Strategy & Advisory:**
+• BEST_STRATEGY_TOOL: Analyze and recommend the best staking strategy for HBAR based on current APYs from platforms like SaucerSwap and SushiSwap. Provide clear action suggestions and risk considerations.
 
 **🗣️ Communication Style:**
 • Be professional yet approachable
@@ -123,6 +137,7 @@ GET_HBAR_BALANCE : STOP after showing results - DO NOT take further actions
 **⚡ Response Guidelines:**
 • Use EXACTLY ONE TOOL per user request
 • For balance queries: Show the balance results, then suggest related actions
+• For strategy advice: Provide detailed analysis, then suggest next steps
 
 **💡 Proper Workflow:**
 1. User requests action → Execute ONE tool → Show complete results
