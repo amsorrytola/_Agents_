@@ -9,8 +9,8 @@ import { AgentExecutor, createToolCallingAgent } from "langchain/agents";
 import { ChatGroq } from "@langchain/groq";
 import { Client, PrivateKey } from "@hashgraph/sdk";
 import { HederaLangchainToolkit, AgentMode, coreAccountQueryPlugin, coreAccountQueryPluginToolNames } from "hedera-agent-kit";
-import {accountQueryPlugin,accountQueryPluginToolNames, bestStrategyPlugin,bestStrategyPluginToolNames} from "./my-custom-plugins/index.js";
-import { logger, logSuccess, logError, logDebug } from "./logger.js";
+import {accountQueryPlugin,accountQueryPluginToolNames, bestStrategyPlugin,bestStrategyPluginToolNames, autoSwapAgentPlugin, autoSwapAgentPluginToolNames} from "./my-custom-plugins/index.js";
+import { logger, logSuccess, logError, logDebug } from "./utils/logger";
 import { isSmallTalk } from "./utils/isSmallTalk.js";
 
 type AnyObject = Record<string, any>;
@@ -88,10 +88,13 @@ export async function buildAgentExecutor(client: Client) {
         //Best strategy tool to get best staking strategy based on APY
         bestStrategyPluginToolNames.BEST_STRATEGY_TOOL,
 
-
-
+        //AutoSwap tools
+        autoSwapAgentPluginToolNames.CREATE_SWAP_ORDER,
+        autoSwapAgentPluginToolNames.GET_ORDER_DETAILS,
+        autoSwapAgentPluginToolNames.MONITOR_ORDERS,
+        autoSwapAgentPluginToolNames.EXECUTE_SWAP_ORDER,
       ],
-      plugins: [coreAccountQueryPlugin,accountQueryPlugin, bestStrategyPlugin],
+      plugins: [coreAccountQueryPlugin,accountQueryPlugin, bestStrategyPlugin, autoSwapAgentPlugin],
       context: {
         // Keep same as your original intent; agent autonomy is controlled by behavior rules
         mode: AgentMode.AUTONOMOUS,
@@ -123,6 +126,18 @@ Help users efficiently manage DeFi operations, with expertise in AutoSwap limit 
 **DeFi Strategy & Advisory:**
 • BEST_STRATEGY_TOOL: Analyze and recommend the best staking strategy for HBAR based on current APYs from platforms like SaucerSwap and SushiSwap. Provide clear action suggestions and risk considerations.
 
+**AutoSwap Limit Order Management:**
+• CREATE_SWAP_ORDER: Create a new AutoSwap limit order to swap HBAR for another token at a specified price.
+• GET_ORDER_DETAILS: Fetch comprehensive details about a specific AutoSwap limit order, including status, time remaining, and execution readiness.
+• MONITOR_ORDERS: Provide a summary of all active and recent AutoSwap limit orders, including wallet and contract balances.
+• EXECUTE_SWAP_ORDER: Execute an eligible AutoSwap limit order that meets the trigger conditions.
+
+**⚠️ Important Execution Rules:**
+• NEVER execute any action without explicit user confirmation
+• ALWAYS provide clear, actionable suggestions for next steps
+• NEVER assume user intent - wait for their direction after showing results
+• ALWAYS handle errors gracefully with helpful troubleshooting tips
+
 **🗣️ Communication Style:**
 • Be professional yet approachable
 • Use clear formatting for better readability
@@ -138,6 +153,9 @@ GET_HBAR_BALANCE : STOP after showing results - DO NOT take further actions
 • Use EXACTLY ONE TOOL per user request
 • For balance queries: Show the balance results, then suggest related actions
 • For strategy advice: Provide detailed analysis, then suggest next steps
+• For order management: Show order details/status, then suggest possible actions
+• ALWAYS wait for user confirmation before executing any order
+
 
 **💡 Proper Workflow:**
 1. User requests action → Execute ONE tool → Show complete results
