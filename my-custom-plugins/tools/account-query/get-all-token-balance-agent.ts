@@ -99,19 +99,69 @@ function createProvider(rpcUrl: string, chainId?: number, name?: string): ethers
 }
 
 /**
+ * Resolve and checksum a possibly malformed address string.
+ * - Removes quotes / whitespace / common prefixes
+ * - Removes zero-width / non-ASCII characters
+ * - If input contains extra text (URL, explorer string), attempts to extract last 40 hex chars
+ * - Returns checksummed address via ethers.getAddress or throws if impossible
+ */
+function resolveAddress(input: string | undefined, label = "address"): string {
+  if (!input) throw new Error(`Missing ${label}`);
+  // basic cleanup
+  let addr = String(input).trim();
+
+  // Remove common prefixes/labels like "ethereum:", "addr=", "Address:"
+  addr = addr.replace(/^ethereum:/i, "");
+  addr = addr.replace(/^(address|addr)=/i, "");
+  addr = addr.replace(/^(0x)?["']|["']$/g, ""); // strip leading/trailing quotes
+
+  // Remove common explorer url wrappers (keep hex chars)
+  // Remove any non-hex characters except 0x
+  // But first replace invisible unicode characters (zero-width, etc.)
+  addr = addr.replace(/[\u200B-\u200D\uFEFF]/g, ""); // remove zero-width chars
+
+  // If it looks like a URL or contains many non-hexs, try to extract the last 40 hex chars
+  const hexOnly = addr.match(/0x([0-9a-fA-F]{40})/) || addr.match(/([0-9a-fA-F]{40})$/);
+  if (hexOnly && hexOnly.length >= 2) {
+    addr = "0x" + hexOnly[1];
+  } else {
+    // remove everything that's not hex or 0x, then hope it's valid
+    addr = addr.replace(/[^0-9a-fA-Fx]/g, "");
+  }
+
+  // ensure it starts with 0x
+  if (!addr.startsWith("0x")) {
+    addr = "0x" + addr;
+  }
+
+  // If too long or too short, throw early
+  const hex = addr.replace(/^0x/i, "");
+  if (hex.length !== 40) {
+    throw new Error(`Unable to parse ${label}: "${input}". Extracted "${addr}" (length ${hex.length}).`);
+  }
+
+  // Now use ethers.getAddress to compute/validate checksum — it will throw if not a valid address
+  try {
+    return ethers.getAddress(addr);
+  } catch (err) {
+    // Pass along a helpful message
+    throw new Error(`Failed to checksum ${label} "${input}": ${(err as Error).message}`);
+  }
+}
+
+
+/**
  * Validate and checksummed EVM user address from env
  */
 function getUserEvmAddress(): string {
-  let evmAddress = process.env.EVM_ADDRESS;
-  if (!evmAddress) {
+  const raw = process.env.EVM_ADDRESS;
+  if (!raw) {
     throw new Error("EVM_ADDRESS not set in environment. Please set EVM_ADDRESS=0x... in your .env file");
   }
-  evmAddress = evmAddress.replace(/['"]/g, "").trim();
-  if (!ethers.isAddress(evmAddress)) {
-    throw new Error(`Invalid EVM address in environment: ${evmAddress}`);
-  }
-  return ethers.getAddress(evmAddress);
+  // resolve + checksum
+  return resolveAddress(raw, "EVM_ADDRESS");
 }
+
 
 /**
  * Format token amount
@@ -134,7 +184,7 @@ function formatTokenAmount(amount: bigint, decimals: number, symbol: string): st
  * Get native balance via provider with timeout
  */
 async function getNativeBalanceWithProvider(provider: ethers.JsonRpcProvider, addr: string): Promise<bigint> {
-  const checksum = ethers.getAddress(addr);
+  const checksum = resolveAddress(addr, "userAddress");
   return await Promise.race([
     provider.getBalance(checksum).then(b => BigInt(b.toString())),
     new Promise<bigint>((_, rej) => setTimeout(() => rej(new Error("native-balance-timeout")), 10000)),
@@ -144,10 +194,15 @@ async function getNativeBalanceWithProvider(provider: ethers.JsonRpcProvider, ad
 /**
  * Get ERC20 token balance via provider with timeout
  */
-async function getTokenBalanceWithProvider(provider: ethers.JsonRpcProvider, tokenAddress: string, addr: string, decimals = 18): Promise<{ balance: bigint; formatted: string }> {
+async function getTokenBalanceWithProvider(
+  provider: ethers.JsonRpcProvider,
+  tokenAddress: string,
+  addr: string,
+  decimals = 18
+): Promise<{ balance: bigint; formatted: string }> {
   try {
-    const checksumToken = ethers.getAddress(tokenAddress);
-    const checksumAddr = ethers.getAddress(addr);
+    const checksumToken = resolveAddress(tokenAddress, "tokenAddress");
+    const checksumAddr = resolveAddress(addr, "userAddress");
     const contract = new ethers.Contract(checksumToken, ERC20_ABI, provider);
     const bal: any = await Promise.race([
       contract.balanceOf(checksumAddr),
@@ -156,9 +211,11 @@ async function getTokenBalanceWithProvider(provider: ethers.JsonRpcProvider, tok
     const big = BigInt(bal.toString());
     return { balance: big, formatted: formatTokenAmount(big, decimals, "TOKEN") };
   } catch (err) {
+    console.warn(`getTokenBalanceWithProvider error for token ${tokenAddress}: ${(err as Error).message}`);
     return { balance: 0n, formatted: `0 TOKEN` };
   }
 }
+
 
 /**
  * Determine candidate chains to check.
